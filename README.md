@@ -63,7 +63,3 @@ git push -u origin main
 
 ## Notes
 - The app creates `tax_calculator.db` in the working directory. Add it to `.gitignore` if you don't want to commit DB files.
-- If you'd like, I can: add a `requirements.txt`, `.gitignore`, create the repo using `gh`, or automate the git steps for you — tell me which you prefer.
-
----
-Created with help from GitHub Copilot.
