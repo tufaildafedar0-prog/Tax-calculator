@@ -4,135 +4,21 @@ from ttkbootstrap.constants import *
 from tkinter import messagebox
 import math
 import time
-import re
-import sqlite3
 from datetime import datetime
+import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.animation as animation
-import numpy as np
 
-# ------------------- DATABASE SETUP -------------------
-DB_FILE = "tax_calculator.db"
-conn = sqlite3.connect(DB_FILE)
-c = conn.cursor()
-c.execute('''
-CREATE TABLE IF NOT EXISTS pan_users (
-    pan TEXT PRIMARY KEY,
-    income REAL,
-    deductions REAL,
-    emi REAL,
-    age INTEGER,
-    timestamp TEXT
+# Import business logic from taxlib module
+from taxlib import (
+    calculate_individual_tax,
+    calculate_corporate_tax,
+    validate_pan,
+    get_pan_entity_type,
+    save_pan_data_db,
+    get_pan_data_db
 )
-''')
-conn.commit()
-
-def save_pan_data_db(pan, income, deductions, emi, age):
-    now = datetime.now().isoformat()
-    c.execute('''
-    INSERT INTO pan_users (pan, income, deductions, emi, age, timestamp)
-    VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(pan) DO UPDATE SET
-        income=excluded.income,
-        deductions=excluded.deductions,
-        emi=excluded.emi,
-        age=excluded.age,
-        timestamp=excluded.timestamp
-    ''', (pan, income, deductions, emi, age, now))
-    conn.commit()
-
-def get_pan_data_db(pan):
-    c.execute("SELECT income, deductions, emi, age FROM pan_users WHERE pan=?", (pan,))
-    row = c.fetchone()
-    if row:
-        return {"income": row[0], "deductions": row[1], "emi": row[2], "age": row[3]}
-    return {}
-
-# ------------------- PAN VALIDATION -------------------
-def validate_pan(pan):
-    pattern = r'^[A-Z]{5}[0-9]{4}[A-Z]$'
-    return bool(re.match(pattern, pan.upper()))
-
-def get_pan_entity_type(pan):
-    c = pan[3].upper()
-    if c == 'P':
-        return "Individual"
-    elif c == 'C':
-        return "Company"
-    else:
-        return "Other"
-
-# ------------------- TAX CALCULATION -------------------
-def calculate_individual_tax(old_income, deductions, age, employment_type="Salaried"):
-    taxable = max(0, old_income - deductions)
-    
-    print(f"TAX CALC: Income={old_income}, Deductions={deductions}, Taxable={taxable}")
-    
-    # CORRECT TAX SLABS for New Regime 2024-25
-    slabs = [
-        (300_000, 0.00),     # 0-3L: 0%
-        (300_000, 0.05),     # 3L-6L: 5%
-        (400_000, 0.10),     # 6L-10L: 10%
-        (500_000, 0.15),     # 10L-15L: 15%
-        (float('inf'), 0.20) # Above 15L: 20%
-    ]
-    
-    rem = taxable
-    slab_details = {}
-    tax_before = 0.0
-    slab_names = ["0–3L", "3L–6L", "6L–10L", "10L–15L", "Above 15L"]
-    
-    for i, (size, rate) in enumerate(slabs):
-        if rem <= 0:
-            break
-        part = min(rem, size)
-        tax_in_slab = part * rate
-        slab_details[slab_names[i]] = round(tax_in_slab, 2)
-        tax_before += tax_in_slab
-        rem -= part
-        print(f"SLAB {slab_names[i]}: {part} * {rate} = {tax_in_slab}")
-
-    # Rebate under section 87A (for income up to 7L)
-    rebate = min(tax_before, 12500) if taxable <= 700000 else 0
-    tax_after = tax_before - rebate
-    cess = tax_after * 0.04  # 4% health and education cess
-    total = round(tax_after + cess, 2)
-    
-    print(f"FINAL: TaxBefore={tax_before}, Rebate={rebate}, Cess={cess}, Total={total}")
-    
-    return total, slab_details, {
-        "gross": old_income,
-        "deductions": deductions,
-        "taxable": taxable,
-        "tax_before": round(tax_before, 2),
-        "rebate": rebate,
-        "tax_after": round(tax_after, 2),
-        "cess": round(cess, 2),
-        "total": total
-    }
-
-def calculate_corporate_tax(gross_income, deductions, entity_type):
-    taxable = max(0, gross_income - deductions)
-    slab_details = {}
-    if entity_type == "Company":
-        rate = 0.22 if gross_income <= 5_000_000 else 0.30
-    else:
-        rate = 0.30
-    tax_before = taxable * rate
-    slab_details[f"{int(rate*100)}% Flat"] = round(tax_before,2)
-    cess = tax_before * 0.04
-    total = round(tax_before + cess,2)
-    return total, slab_details, {
-        "gross": gross_income,
-        "deductions": deductions,
-        "taxable": taxable,
-        "tax_before": round(tax_before,2),
-        "rebate": 0,
-        "tax_after": round(tax_before,2),
-        "cess": round(cess,2),
-        "total": total
-    }
 
 # ------------------- SMOOTH ANIMATION SYSTEM -------------------
 class SmoothAnimator:
