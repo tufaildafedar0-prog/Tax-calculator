@@ -1,0 +1,14 @@
+{
+    "JDNPD3770D": {
+        "income": 1000000.0,
+        "deductions": 10000.0,
+        "emi": 1000.0,
+        "age": 30
+    },
+    "ABCDE1234F": {
+        "income": 1000000.0,
+        "deductions": 50000.0,
+        "emi": 10000.0,
+        "age": 30
+    }
+}
