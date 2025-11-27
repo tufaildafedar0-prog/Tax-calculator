@@ -19,6 +19,30 @@ ENV/
 *.suo
 *.user
 
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Logs
+*.log
+build_log.txt
+
+# Application artifacts
+*.xlsx
+*.zip
+export_test*.xlsx
+export_test_script.py
+tax_calculator-v1.0.0.zip
+
+# Local config
+Tax calc/taxflow_config.json
+
 # OS files
 .DS_Store
 Thumbs.db

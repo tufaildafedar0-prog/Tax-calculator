@@ -9,6 +9,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.animation as animation
+from tkinter import filedialog
+
+# Export helpers
+try:
+    from taxlib.export import export_report_pdf, export_report_excel
+except Exception:
+    # If import fails during development/test, define placeholders to avoid runtime error
+    def export_report_pdf(results, path):
+        raise RuntimeError("report export not available")
+    def export_report_excel(results, path):
+        raise RuntimeError("export not available")
 
 # Import business logic from taxlib module
 from taxlib import (
@@ -19,6 +30,8 @@ from taxlib import (
     save_pan_data_db,
     get_pan_data_db
 )
+from taxlib import config as app_config
+from taxlib import i18n
 
 # ------------------- SMOOTH ANIMATION SYSTEM -------------------
 class SmoothAnimator:
@@ -121,6 +134,34 @@ class CompleteDashboard:
             bootstyle="secondary"
         ).grid(row=1, column=0, sticky="w", pady=(5, 0))
         
+        # Chart mode selector (Pie / Bar / Line)
+        mode_frame = ttk.Frame(header_frame)
+        mode_frame.grid(row=0, column=1, sticky="e")
+
+        self.chart_mode_var = tk.StringVar(value="Pie")
+
+        # Language selector
+        self.lang_var = tk.StringVar(value=i18n.get_language())
+        lang_menu = ttk.OptionMenu(mode_frame, self.lang_var, i18n.get_language(), 'en', 'hi')
+        lang_menu.pack(side='left', padx=(10,0))
+        def _on_lang_change(*args):
+            lang = self.lang_var.get()
+            i18n.set_language(lang)
+            app_config.set('language', lang)
+        try:
+            self.lang_var.trace_add('write', _on_lang_change)
+        except Exception:
+            self.lang_var.trace('w', _on_lang_change)
+
+        ttk.Label(mode_frame, text="Chart Type:", font=("Segoe UI", 10)).pack(side="left", padx=(0,6))
+        ttk.OptionMenu(mode_frame, self.chart_mode_var, "Pie", "Pie", "Bar", "Line").pack(side="left")
+        # Redraw charts when mode changes
+        try:
+            self.chart_mode_var.trace_add('write', lambda *args: self.refresh_layout())
+        except Exception:
+            # Older tkinter may use trace
+            self.chart_mode_var.trace('w', lambda *args: self.refresh_layout())
+        
         # Create notebook for tabs
         self.notebook = ttk.Notebook(self.window, bootstyle="primary")
         self.notebook.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
@@ -167,13 +208,22 @@ class CompleteDashboard:
             self.window.update_idletasks()
             if hasattr(self, 'fig1') and self.fig1:
                 self.fig1.tight_layout()
-                self.canvas1.draw()
+                try:
+                    self.canvas1.draw_idle()
+                except Exception:
+                    self.canvas1.draw()
             if hasattr(self, 'fig2') and self.fig2:
                 self.fig2.tight_layout()
-                self.canvas2.draw()
+                try:
+                    self.canvas2.draw_idle()
+                except Exception:
+                    self.canvas2.draw()
             if hasattr(self, 'fig3') and self.fig3:
                 self.fig3.tight_layout()
-                self.canvas3.draw()
+                try:
+                    self.canvas3.draw_idle()
+                except Exception:
+                    self.canvas3.draw()
         except Exception as e:
             pass  # Ignore any layout errors
 
@@ -230,17 +280,29 @@ class CompleteDashboard:
         # 1. Main Pie Chart - Income Distribution
         def animate_main_pie(frame):
             self.ax1_1.clear()
+            mode = getattr(self, 'chart_mode_var', tk.StringVar(value='Pie')).get()
             if frame <= len(values):
                 current_values = [v if i < frame else 0.1 for i, v in enumerate(values)]
-                wedges, texts, autotexts = self.ax1_1.pie(
-                    current_values, labels=labels, colors=colors,
-                    autopct=lambda p: f'{p:.1f}%' if p > 1 else '',
-                    startangle=90, shadow=True
-                )
-                for autotext in autotexts:
-                    autotext.set_color('white')
-                    autotext.set_fontweight('bold')
-                self.ax1_1.set_title('Income Distribution', fontsize=14, fontweight='bold', pad=20)
+                if mode == 'Pie':
+                    wedges, texts, autotexts = self.ax1_1.pie(
+                        current_values, labels=labels, colors=colors,
+                        autopct=lambda p: f'{p:.1f}%' if p > 1 else '',
+                        startangle=90, shadow=True
+                    )
+                    for autotext in autotexts:
+                        autotext.set_color('white')
+                        autotext.set_fontweight('bold')
+                    self.ax1_1.set_title('Income Distribution (Pie)', fontsize=14, fontweight='bold', pad=20)
+                elif mode == 'Bar':
+                    bars = self.ax1_1.bar(labels, current_values, color=colors, alpha=0.9)
+                    self.ax1_1.set_title('Income Distribution (Bar)', fontsize=14, fontweight='bold', pad=20)
+                    for bar, amount in zip(bars, current_values):
+                        if amount > 0:
+                            self.ax1_1.text(bar.get_x() + bar.get_width()/2., bar.get_height() + bar.get_height()*0.01,
+                                            f'₹{amount:,.0f}', ha='center', va='bottom', fontweight='bold')
+                else:  # Line
+                    self.ax1_1.plot(labels, current_values, 'o-', color='#4361EE', linewidth=2)
+                    self.ax1_1.set_title('Income Distribution (Line)', fontsize=14, fontweight='bold', pad=20)
             return []
         
         # 2. Monthly Breakdown
@@ -289,20 +351,29 @@ class CompleteDashboard:
         def animate_complete_bar(frame):
             self.ax1_4.clear()
             if frame > 0:
+                mode = getattr(self, 'chart_mode_var', tk.StringVar(value='Pie')).get()
                 current_categories = categories[:frame]
                 current_amounts = amounts[:frame]
                 current_colors = bar_colors[:frame]
-                
-                bars = self.ax1_4.bar(current_categories, current_amounts, color=current_colors, alpha=0.8)
-                self.ax1_4.set_title('Complete Financial Overview', fontsize=14, fontweight='bold', pad=20)
-                self.ax1_4.tick_params(axis='x', rotation=15)
-                self.ax1_4.grid(True, alpha=0.3)
-                
-                # Add value labels
-                for bar, amount in zip(bars, current_amounts):
-                    height = bar.get_height()
-                    self.ax1_4.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
-                            f'₹{amount:,.0f}', ha='center', va='bottom', fontweight='bold')
+
+                if mode == 'Bar':
+                    bars = self.ax1_4.bar(current_categories, current_amounts, color=current_colors, alpha=0.8)
+                    self.ax1_4.set_title('Complete Financial Overview', fontsize=14, fontweight='bold', pad=20)
+                    self.ax1_4.tick_params(axis='x', rotation=15)
+                    self.ax1_4.grid(True, alpha=0.3)
+
+                    # Add value labels
+                    for bar, amount in zip(bars, current_amounts):
+                        height = bar.get_height()
+                        self.ax1_4.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
+                                f'₹{amount:,.0f}', ha='center', va='bottom', fontweight='bold')
+                elif mode == 'Pie':
+                    vals = current_amounts if frame == len(amounts) else [v if i < frame else 0.1 for i, v in enumerate(amounts)]
+                    self.ax1_4.pie(vals, labels=categories, colors=bar_colors, startangle=90, autopct=lambda p: f'{p:.1f}%' if p>1 else '')
+                    self.ax1_4.set_title('Complete Financial Overview (Pie)', fontsize=14, fontweight='bold', pad=20)
+                else:  # Line
+                    self.ax1_4.plot(current_categories, current_amounts, 'o-', color='#6BCF7F', linewidth=2)
+                    self.ax1_4.set_title('Complete Financial Overview (Line)', fontsize=14, fontweight='bold', pad=20)
             return []
         
         # Create all animations
@@ -313,7 +384,10 @@ class CompleteDashboard:
         
         self.animations.extend([ani1, ani2, ani3, ani4])
         self.fig1.tight_layout()
-        self.canvas1.draw()
+        try:
+            self.canvas1.draw_idle()
+        except Exception:
+            self.canvas1.draw()
     
     def create_tax_tab(self):
         tab2 = ttk.Frame(self.notebook)
@@ -477,7 +551,10 @@ class CompleteDashboard:
         
         self.animations.extend([ani1, ani2, ani3, ani4])
         self.fig2.tight_layout()
-        self.canvas2.draw()
+        try:
+            self.canvas2.draw_idle()
+        except Exception:
+            self.canvas2.draw()
     
     def create_insights_tab(self):
         tab3 = ttk.Frame(self.notebook)
@@ -602,7 +679,10 @@ class CompleteDashboard:
         
         self.animations.extend([ani1, ani2, ani3, ani4])
         self.fig3.tight_layout()
-        self.canvas3.draw()
+        try:
+            self.canvas3.draw_idle()
+        except Exception:
+            self.canvas3.draw()
     
     def animate_current_tab(self):
         """Animate the currently active tab"""
@@ -718,6 +798,12 @@ def calculate_tax():
     # Show dashboard button
     btn_dashboard.config(state="normal", text="📊 View Dashboard", bootstyle="info")
     loading_label.config(text="✅ Calculation complete! Click 'View Dashboard' for detailed charts.")
+    # Enable export buttons
+    try:
+        btn_export_pdf.config(state="normal")
+        btn_export_xlsx.config(state="normal")
+    except NameError:
+        pass
 
 def update_efficiency_metrics():
     if hasattr(app, 'calc_results'):
@@ -775,6 +861,44 @@ def update_details_text(results):
     txt_details.insert(tk.END, "\n".join(detail_lines))
     txt_details.config(state="disabled")
 
+
+def _export_pdf():
+    if not hasattr(app, 'calc_results'):
+        messagebox.showwarning("No Results", "Please run a calculation first.")
+        return
+    save_path = filedialog.asksaveasfilename(defaultextension='.pdf', filetypes=[('PDF files','*.pdf')], title='Save PDF Report')
+    if not save_path:
+        return
+    try:
+        figs = None
+        if hasattr(app, 'current_dashboard') and getattr(app, 'current_dashboard'):
+            dash = app.current_dashboard
+            figs = [getattr(dash, 'fig1', None), getattr(dash, 'fig2', None), getattr(dash, 'fig3', None)]
+            figs = [f for f in figs if f is not None]
+        export_report_pdf(app.calc_results, save_path, figs=figs)
+        messagebox.showinfo("Exported", f"PDF report saved to: {save_path}")
+    except Exception as e:
+        messagebox.showerror("Export Error", f"Failed to export PDF: {e}")
+
+
+def _export_xlsx():
+    if not hasattr(app, 'calc_results'):
+        messagebox.showwarning("No Results", "Please run a calculation first.")
+        return
+    save_path = filedialog.asksaveasfilename(defaultextension='.xlsx', filetypes=[('Excel files','*.xlsx')], title='Save Excel Report')
+    if not save_path:
+        return
+    try:
+        figs = None
+        if hasattr(app, 'current_dashboard') and getattr(app, 'current_dashboard'):
+            dash = app.current_dashboard
+            figs = [getattr(dash, 'fig1', None), getattr(dash, 'fig2', None), getattr(dash, 'fig3', None)]
+            figs = [f for f in figs if f is not None]
+        export_report_excel(app.calc_results, save_path, figs=figs)
+        messagebox.showinfo("Exported", f"Excel report saved to: {save_path}")
+    except Exception as e:
+        messagebox.showerror("Export Error", f"Failed to export Excel: {e}")
+
 def toggle_theme():
     current = app.style.theme.name
     if current == "morph":
@@ -812,6 +936,17 @@ app.minsize(1200, 800)
 
 # Create employment type variable AFTER app is created
 employment_type_var = tk.StringVar(value="Salaried")
+
+# Load persisted theme and language preferences
+try:
+    saved_theme = app_config.get('theme')
+    if saved_theme:
+        app.style.theme_use(saved_theme)
+    saved_lang = app_config.get('language')
+    if saved_lang:
+        i18n.set_language(saved_lang)
+except Exception:
+    pass
 
 def on_employment_type_change():
     """Update standard deduction based on employment type"""
@@ -1085,13 +1220,26 @@ btn_reset = ttk.Button(action_frame, text="🔄 Reset", command=reset_form,
                      bootstyle="warning", width=15)
 btn_reset.pack(side="left", padx=(0, 15))
 
+def _open_dashboard():
+    # Create and store the dashboard instance on the app so exports can access figures
+    app.current_dashboard = CompleteDashboard(app.calc_results["steps"], 
+                                               app.calc_results["emi"], 
+                                               app.calc_results["entity"])
+
 btn_dashboard = ttk.Button(action_frame, text="📊 View Dashboard", 
-                          command=lambda: CompleteDashboard(app.calc_results["steps"], 
-                                                           app.calc_results["emi"], 
-                                                           app.calc_results["entity"]),
+                          command=_open_dashboard,
                           bootstyle="info", width=18)
 btn_dashboard.pack(side="left", padx=(0, 20))
 btn_dashboard.config(state="disabled")
+
+# Export buttons (disabled until a calculation is run)
+btn_export_pdf = ttk.Button(action_frame, text="📄 Export PDF", bootstyle="secondary", width=16, command=_export_pdf)
+btn_export_pdf.pack(side="left", padx=(0, 8))
+btn_export_pdf.config(state="disabled")
+
+btn_export_xlsx = ttk.Button(action_frame, text="📁 Export Excel", bootstyle="secondary", width=16, command=_export_xlsx)
+btn_export_xlsx.pack(side="left", padx=(0, 8))
+btn_export_xlsx.config(state="disabled")
 
 loading_label = ttk.Label(action_frame, text="", font=("Segoe UI", 11, "bold"), bootstyle="info")
 loading_label.pack(side="left")
